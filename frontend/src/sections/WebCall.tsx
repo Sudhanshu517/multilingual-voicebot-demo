@@ -30,38 +30,87 @@ export function WebCall({ userName, userId }: WebCallProps) {
   const [isListening, setIsListening] = useState(false)
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [recognition, setRecognition] = useState<any>(null)
+  const [room, setRoom] = useState<Room | null>(null)
+  const [recordingTimer, setRecordingTimer] = useState<NodeJS.Timeout | null>(null)
   
   const audioRef = useRef<HTMLAudioElement>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Start call with continuous listening
+  // Start call with SocketIO streaming
   const handleStartCall = async () => {
-    setIsInCall(true)
-    
-    // Start timer
-    intervalRef.current = setInterval(() => {
-      setCallDuration(prev => prev + 1)
-    }, 1000)
-    
-    // Start continuous listening
-    startContinuousListening()
-    
-    // Send initial greeting to backend to get proper response
-    setTimeout(() => {
-      fetch(`${BACKEND_URL}/text-chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: 'hello', driver_id: userId, session_id: userId })
+    try {
+      setIsInCall(true)
+      setIsProcessing(true)
+      
+      // Start timer
+      intervalRef.current = setInterval(() => {
+        setCallDuration(prev => prev + 1)
+      }, 1000)
+      
+      // Check if SocketIO is available
+      if (!(window as any).io) {
+        throw new Error('SocketIO not loaded')
+      }
+      
+      // Get microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      
+      // Connect to SocketIO
+      const socket = (window as any).io(`${BACKEND_URL}`)
+      
+      socket.on('connect', () => {
+        console.log('✅ Connected to voice stream')
+        setIsListening(true)
+        setIsProcessing(false)
+        startAudioStreaming(stream, socket)
+        
+        // Send welcome message request
+        setTimeout(() => {
+          socket.emit('audio_stream', {
+            data: 'data:audio/wav;base64,', // Empty audio to trigger welcome
+            userId: userId,
+            isWelcome: true
+          })
+        }, 1000)
       })
-      .then(res => res.json())
-      .then(data => {
-        if (!data.error) {
-          addAiMessage(data.text_response)
+      
+      socket.on('transcription', (data: any) => {
+        setConversation(prev => [...prev, { type: 'user', text: data.text }])
+      })
+      
+      socket.on('ai_response', (data: any) => {
+        setConversation(prev => [...prev, { type: 'ai', text: data.text }])
+        setIsAiSpeaking(true)
+        setIsProcessing(false)
+        
+        if (data.audio && !isSpeakerOff) {
+          playAudioFromBase64(data.audio)
+        } else {
+          setTimeout(() => setIsAiSpeaking(false), 2000)
+        }
+        
+        // Check for call end
+        if (data.shouldEnd) {
+          setTimeout(() => handleEndCall(), 4000)
         }
       })
-      .catch(console.error)
-    }, 1000)
+      
+      socket.on('connect_error', (error: any) => {
+        console.error('Socket connection failed:', error)
+        setIsInCall(false)
+        setIsProcessing(false)
+        startContinuousListening()
+      })
+      
+      setRoom({ socket, stream } as any)
+      
+    } catch (error) {
+      console.error('Call start failed:', error)
+      setIsInCall(false)
+      setIsProcessing(false)
+      // Fallback to speech recognition
+      startContinuousListening()
+    }
   }
 
   // End call
@@ -75,14 +124,22 @@ export function WebCall({ userName, userId }: WebCallProps) {
     setIsProcessing(false)
     setIsAiSpeaking(false)
     
+    if (recordingTimer) {
+      clearTimeout(recordingTimer)
+      setRecordingTimer(null)
+    }
+    
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
     
-    if (recognition) {
-      recognition.stop()
-      setRecognition(null)
+    if (room && room.socket) {
+      room.socket.disconnect()
+      if (room.stream) {
+        room.stream.getTracks().forEach((track: any) => track.stop())
+      }
+      setRoom(null)
     }
     
     if (audioRef.current) {
@@ -102,13 +159,64 @@ export function WebCall({ userName, userId }: WebCallProps) {
     }
   }, [])
 
-  // Add AI message with audio playback
-  const addAiMessage = (text: string) => {
-    setIsAiSpeaking(true)
-    setTimeout(() => {
-      setConversation(prev => [...prev, { type: 'ai', text }])
-      setIsAiSpeaking(false)
-    }, 1000)
+  // Audio streaming functions
+  const startAudioStreaming = (stream: MediaStream, socket: any) => {
+    const mediaRecorder = new MediaRecorder(stream)
+    const audioChunks: BlobPart[] = []
+    
+    mediaRecorder.ondataavailable = (event) => {
+      audioChunks.push(event.data)
+    }
+    
+    mediaRecorder.onstop = () => {
+      if (audioChunks.length > 0 && !isAiSpeaking && !isProcessing) {
+        setIsProcessing(true)
+        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' })
+        const reader = new FileReader()
+        reader.onload = () => {
+          socket.emit('audio_stream', {
+            data: reader.result,
+            userId: userId
+          })
+        }
+        reader.readAsDataURL(audioBlob)
+      }
+      audioChunks.length = 0
+    }
+    
+    // Record only when conditions are met
+    const scheduleRecording = () => {
+      if (recordingTimer) {
+        clearTimeout(recordingTimer)
+      }
+      
+      const timer = setTimeout(() => {
+        if (socket.connected && !isAiSpeaking && !isProcessing && mediaRecorder.state === 'inactive') {
+          mediaRecorder.start()
+          setTimeout(() => {
+            if (mediaRecorder.state === 'recording') {
+              mediaRecorder.stop()
+            }
+          }, 4000) // 4 second chunks
+        }
+        scheduleRecording()
+      }, 1000)
+      
+      setRecordingTimer(timer)
+    }
+    
+    scheduleRecording()
+    setMediaRecorder(mediaRecorder)
+  }
+  
+  const playAudioFromBase64 = (base64Audio: string) => {
+    if (audioRef.current) {
+      audioRef.current.src = base64Audio
+      audioRef.current.onended = () => {
+        setIsAiSpeaking(false)
+      }
+      audioRef.current.play()
+    }
   }
 
   // Start continuous voice listening (like backend)
@@ -339,7 +447,7 @@ export function WebCall({ userName, userId }: WebCallProps) {
                         .then(res => res.json())
                         .then(data => {
                           if (!data.error) {
-                            addAiMessage(data.text_response)
+                            setConversation(prev => [...prev, { type: 'ai', text: data.text_response }])
                           }
                         })
                         .catch(console.error)
@@ -472,7 +580,7 @@ export function WebCall({ userName, userId }: WebCallProps) {
                     .then(res => res.json())
                     .then(data => {
                       if (!data.error) {
-                        addAiMessage(data.text_response)
+                        setConversation(prev => [...prev, { type: 'ai', text: data.text_response }])
                       }
                     })
                     .catch(console.error)

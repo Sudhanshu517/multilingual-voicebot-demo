@@ -75,6 +75,7 @@ const problemCategories = [
   }
 ]
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
 export function Chatbot({ userName, userId }: ChatbotProps) {
   const welcomeMessage = `Namaste ${userName}! Main SachAI hoon. Aapki help kaise kar sakta hoon today?\n\n(Hello ${userName}! I am SachAI. How can I help you today?)\n\nYour Driver ID: ${userId}`
   
@@ -123,7 +124,7 @@ export function Chatbot({ userName, userId }: ChatbotProps) {
     setIsTyping(true)
 
     try {
-      const response = await fetch('http://localhost:5000/text-chat', {
+      const response = await fetch(`${BACKEND_URL}/text-chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -226,7 +227,7 @@ export function Chatbot({ userName, userId }: ChatbotProps) {
       formData.append('driver_id', userId)
       formData.append('session_id', userId)
 
-      const response = await fetch('http://localhost:5000/voice-chat', {
+      const response = await fetch(`${BACKEND_URL}/voice-chat`, {
         method: 'POST',
         body: formData
       })
