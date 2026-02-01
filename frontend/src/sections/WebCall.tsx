@@ -5,8 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { 
   Phone, 
   PhoneOff, 
-  Mic, 
-  MicOff, 
+  Mic,
   Volume2,
   VolumeX,
   MessageSquare,

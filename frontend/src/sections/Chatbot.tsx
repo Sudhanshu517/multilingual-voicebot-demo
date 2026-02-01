@@ -10,8 +10,7 @@ import {
   ChevronRight,
   Phone,
   Mic,
-  MicOff,
-  Volume2
+  MicOff
 } from 'lucide-react'
 
 interface ChatbotProps {
