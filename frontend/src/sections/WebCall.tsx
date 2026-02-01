@@ -19,6 +19,8 @@ interface WebCallProps {
   userId: string
 }
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
+
 export function WebCall({ userName, userId }: WebCallProps) {
   const [isInCall, setIsInCall] = useState(false)
   const [isSpeakerOff, setIsSpeakerOff] = useState(false)
@@ -47,7 +49,7 @@ export function WebCall({ userName, userId }: WebCallProps) {
     
     // Send initial greeting to backend to get proper response
     setTimeout(() => {
-      fetch('http://localhost:5000/text-chat', {
+      fetch(`${BACKEND_URL}/text-chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: 'hello', driver_id: userId, session_id: userId })
@@ -191,7 +193,7 @@ export function WebCall({ userName, userId }: WebCallProps) {
     setIsAiSpeaking(true)
     
     try {
-      const response = await fetch('http://localhost:5000/text-chat', {
+      const response = await fetch(`${BACKEND_URL}/text-chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: text, driver_id: userId, session_id: userId })
@@ -329,7 +331,7 @@ export function WebCall({ userName, userId }: WebCallProps) {
                         setConversation(prev => [...prev, { type: 'user', text: userText }])
                         
                         // Send to backend
-                        fetch('http://localhost:5000/text-chat', {
+                        fetch(`${BACKEND_URL}/text-chat`, {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ query: userText, driver_id: userId, session_id: userId })
@@ -462,7 +464,7 @@ export function WebCall({ userName, userId }: WebCallProps) {
                     setConversation(prev => [...prev, { type: 'user', text: userText }])
                     
                     // Send to backend
-                    fetch('http://localhost:5000/text-chat', {
+                    fetch(`${BACKEND_URL}/text-chat`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ query: userText, driver_id: userId, session_id: userId })
